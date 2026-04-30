@@ -41,7 +41,7 @@ async function showMainMenu(
     : '';
 
   const text =
-    `${greeting}🏠 <b>VaultBot</b> — Your Private Assistant\n\n` +
+    `${greeting}🏠 <b>🔒 Your encrypted personal vault</b> — Dev @DrkingBD\n\n` +
     `🔐 2FA Accounts: <b>${stats.totp}</b>\n` +
     `🔑 Passwords:    <b>${stats.passwords}</b>\n` +
     `📝 Notes:        <b>${stats.notes}</b>\n` +
