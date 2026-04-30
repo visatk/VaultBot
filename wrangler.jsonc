@@ -1,6 +1,6 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "dev",
+	"name": "vault",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-29",
 	"compatibility_flags": [
