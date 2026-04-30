@@ -17,6 +17,6 @@
   "dependencies": {
 	"@oslojs/otp": "^1.1.0",
 	"@oslojs/encoding": "^1.1.0",
-	"hono": "^4.12.12",
+	"hono": "^4.12.12"
   }
 }
