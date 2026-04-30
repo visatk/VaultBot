@@ -1,14 +1,3 @@
-// ─── src/db.ts ───────────────────────────────────────────────
-// Database helpers: user management, sessions, full CRUD for
-// all features. All queries use D1 prepared statements with
-// ordered parameters (?1, ?2…) per the official D1 API docs.
-//
-// Performance patterns applied from Cloudflare best practices:
-//   • batch() for related multi-statement reads (getUserStats)
-//   • KV caching layer for frequently-read session state
-//   • Always await .run() / .all() / .first() — never fire & forget
-//   • last_row_id / changes come from D1Result.meta
-
 import type {
   Env, DbUser, DbTotp, DbPassword, DbNote, DbTodo, DbVault, DbSession,
 } from './types';
