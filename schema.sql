@@ -1,14 +1,3 @@
--- ============================================================
--- VaultBot: 2FA + Password Manager + Notes + Todo + Vault
--- D1 Database Schema v2
--- Apply via: npx wrangler d1 execute <DB_NAME> --file=schema.sql
--- ============================================================
-
-PRAGMA journal_mode = WAL;      -- Write-Ahead Logging for read concurrency
-PRAGMA foreign_keys = ON;       -- Enforce referential integrity
-
--- ── Users ────────────────────────────────────────────────────
-
 CREATE TABLE IF NOT EXISTS users (
   id          INTEGER PRIMARY KEY,            -- Telegram user_id (immutable)
   username    TEXT,                           -- @handle (nullable)
