@@ -21,5 +21,11 @@
       "binding": "KV",
       "id": "aba08ec739114c07bf4bf4cfcdfdee05"
     }
+  ],
+ "r2_buckets": [
+    {
+      "binding": "R2",
+      "bucket_name": "vault"
+    }
   ]
 }
