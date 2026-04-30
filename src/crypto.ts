@@ -1,22 +1,3 @@
-// ─── src/crypto.ts ───────────────────────────────────────────
-// WebCrypto helpers for AES-GCM encryption / TOTP generation.
-// Zero external dependencies — uses only Web Standard APIs
-// available in the Cloudflare Workers runtime.
-//
-// Runtime notes (from Workers docs):
-//   • crypto.subtle is always available — no import needed
-//   • crypto.getRandomValues() is available and cryptographically secure
-//   • No Node.js crypto module required when using Web Crypto API
-//   • BigInt is available for the full 64-bit TOTP counter
-
-// ── Key derivation / import ───────────────────────────────────
-
-/**
- * Import the 32-byte hex master key from env as a CryptoKey.
- * Cached in module scope after first use — Workers v8 isolates
- * keep module-level state for the lifetime of the isolate, so
- * subsequent calls within the same request (or warm isolate) are free.
- */
 const keyCache = new Map<string, CryptoKey>();
 
 async function getMasterKey(hexKey: string): Promise<CryptoKey> {
