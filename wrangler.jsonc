@@ -1,31 +1,34 @@
 {
-	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "vault",
-	"main": "src/index.ts",
-	"compatibility_date": "2026-04-29",
-	"compatibility_flags": [
-		"nodejs_compat"
-	],
-	"observability": {
-		"enabled": true
-	},
-    "d1_databases": [
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vault",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-29",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
     {
       "binding": "DB",
       "database_name": "vault",
-      "database_id": "37e7399d-c819-4478-8006-a74aea147b4b"
+      "database_id": "4a723110-aa0c-4ae7-9af8-d80ed1ceb842",
+      "preview_database_id": "4a723110-aa0c-4ae7-9af8-d80ed1ceb842" 
     }
   ],
-   "kv_namespaces": [
+  "kv_namespaces": [
     {
       "binding": "KV",
-      "id": "aba08ec739114c07bf4bf4cfcdfdee05"
+      "id": "aba08ec739114c07bf4bf4cfcdfdee05",
+      "preview_id": "aba08ec739114c07bf4bf4cfcdfdee05"
     }
   ],
- "r2_buckets": [
+  "r2_buckets": [
     {
       "binding": "R2",
-      "bucket_name": "vault"
+      "bucket_name": "vault",
+      "preview_bucket_name": "vault"
     }
   ]
 }
