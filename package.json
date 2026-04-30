@@ -1,6 +1,6 @@
 {
-  "name": "my",
-  "version": "0.0.0",
+  "name": "dev",
+  "version": "0.0.1",
   "private": true,
   "scripts": {
     "deploy": "wrangler types && wrangler deploy",
@@ -15,6 +15,8 @@
     "wrangler": "^4.81.1"
   },
   "dependencies": {
-	"hono": "^4.12.12"
+	"@oslojs/otp": "^1.1.0",
+	"@oslojs/encoding": "^1.1.0",
+	"hono": "^4.12.12",
   }
 }
