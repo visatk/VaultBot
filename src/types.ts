@@ -1,8 +1,3 @@
-// ─── src/types.ts ────────────────────────────────────────────
-// Cloudflare Workers environment bindings + Telegram API types.
-
-// ── Worker environment ────────────────────────────────────────
-
 export interface Env {
   // Cloudflare bindings (declared in wrangler.jsonc)
   DB:  D1Database;      // D1 SQLite — primary data store
