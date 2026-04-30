@@ -1,7 +1,3 @@
-/**
- * VaultBot — Personal Security & Productivity Telegram Bot
- * Cloudflare Workers + D1 + KV
- */
 import { Env, TgUpdate, TgMessage, TgCallbackQuery } from './types';
 import { sendMessage, setMyCommands, answerCallback } from './telegram';
 import { getOrCreateUser, isUnlocked } from './db';
