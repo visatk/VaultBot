@@ -1,15 +1,3 @@
-// ─── src/index.ts ────────────────────────────────────────────
-// VaultBot — Cloudflare Workers entry point.
-//
-// Architecture follows Workers Module syntax (ES Modules, not Service Workers).
-// Security model:
-//   • Owner-only gate: all messages/callbacks verified against OWNER_ID
-//   • Webhook secret header (X-Telegram-Bot-Api-Secret-Token) validated
-//   • ctx.waitUntil() used for heavy processing — ensures instant 200 OK
-//
-// Route convention:
-//   callback_data format: "feature:action:param" e.g. "totp:view:42"
-
 import { sendMessage, answerCallback, fmt } from './telegram';
 import {
   upsertUser, getUser, getSession, setState, clearState, getUserStats, globalSearch,
