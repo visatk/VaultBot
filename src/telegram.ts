@@ -1,11 +1,3 @@
-// ─── src/telegram.ts ─────────────────────────────────────────
-// Thin, typed Telegram Bot API client using the Workers fetch() API.
-// Implements best practices from Workers docs:
-//   • Never throws on Telegram errors — bot must never crash
-//   • Structured console.error logging for observability
-//   • ctx.waitUntil-friendly (all returns are Promises)
-//   • Supports answer_callback, edit, delete, sendPhoto, sendDocument
-
 import type { InlineKeyboard } from './types';
 
 const BASE = 'https://api.telegram.org/bot';
