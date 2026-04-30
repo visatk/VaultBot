@@ -90,7 +90,7 @@ async function showSettingsMenu(
     `<b>Security</b>\n` +
     `• Encryption: AES-256-GCM\n` +
     `• TOTP: RFC 6238\n` +
-    `• Storage: Cloudflare D1 + R2\n\n` +
+    `• Storage: S3\n\n` +
     `<i>All data is owner-only and end-to-end encrypted.</i>`;
 
   const keyboard = [
