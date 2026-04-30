@@ -12,14 +12,14 @@
     "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "cybercoderbd",
-      "database_id": "42b9b4fc-c442-40be-8b89-df0cca15a0c6"
+      "database_name": "vault",
+      "database_id": "37e7399d-c819-4478-8006-a74aea147b4b"
     }
   ],
    "kv_namespaces": [
     {
       "binding": "KV",
-      "id": "bf117b44d5374d77a67c1ad5678075cc"
+      "id": "aba08ec739114c07bf4bf4cfcdfdee05"
     }
   ]
 }
