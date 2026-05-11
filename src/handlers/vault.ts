@@ -1,11 +1,5 @@
-// ─── src/handlers/vault.ts ──────────────────────────────────
-// Private Vault: bookmarks, articles, images, videos, files,
-// inspiration, and screenshots. R2-backed media storage.
-// Enhancements: R2 presigned URL generation, collection grouping,
-// search, MIME-type detection, proper R2 httpMetadata.
-
 import {
-  sendMessage, editMessage, answerCallback, getFile, downloadFile, kb, fmt,
+  sendMessage, editMessage, answerCallback, getFile, downloadFile, sendChatAction, kb, fmt, sendDocumentUpload
 } from '../telegram';
 import {
   getVaultItems, getVaultById, addVaultItem, deleteVaultItem,
@@ -37,7 +31,6 @@ function renderVaultItem(item: DbVault): string {
   return `${pin}${typeEmoji(item.type)} <b>${fmt.escape(title)}</b>${fav}`;
 }
 
-// MIME → type mapping for auto-detect
 const MIME_TYPE_MAP: Record<string, string> = {
   'image/jpeg':       'image',
   'image/png':        'image',
@@ -79,30 +72,12 @@ export async function showVaultMenu(
       : `Browse by type, search, or view recent items.`);
 
   const keyboard = [
-    kb.row(
-      { text: '🔗 Links',    data: 'vault:type:link' },
-      { text: '📰 Articles', data: 'vault:type:article' },
-    ),
-    kb.row(
-      { text: '🖼 Images',    data: 'vault:type:image'       },
-      { text: '🎥 Videos',    data: 'vault:type:video'       },
-    ),
-    kb.row(
-      { text: '✨ Inspiration', data: 'vault:type:inspiration' },
-      { text: '📸 Screenshots', data: 'vault:type:screenshot'  },
-    ),
-    kb.row(
-      { text: '📄 Notes',   data: 'vault:type:note'   },
-      { text: '📎 Files',   data: 'vault:type:file'   },
-    ),
-    kb.row(
-      { text: '⭐ Favourites', data: 'vault:favourites:0' },
-      { text: '📋 All Items',  data: 'vault:all:0'        },
-    ),
-    kb.row(
-      { text: '🔍 Search',      data: 'vault:search' },
-      { text: '➕ Add Link/Text', data: 'vault:add_text' },
-    ),
+    kb.row({ text: '🔗 Links', data: 'vault:type:link' }, { text: '📰 Articles', data: 'vault:type:article' }),
+    kb.row({ text: '🖼 Images', data: 'vault:type:image' }, { text: '🎥 Videos', data: 'vault:type:video' }),
+    kb.row({ text: '✨ Inspiration', data: 'vault:type:inspiration' }, { text: '📸 Screenshots', data: 'vault:type:screenshot' }),
+    kb.row({ text: '📄 Notes', data: 'vault:type:note' }, { text: '📎 Files', data: 'vault:type:file' }),
+    kb.row({ text: '⭐ Favourites', data: 'vault:favourites:0' }, { text: '📋 All Items', data: 'vault:all:0' }),
+    kb.row({ text: '🔍 Search', data: 'vault:search' }, { text: '➕ Add Link/Text', data: 'vault:add_text' }),
     kb.row({ text: '‹ Back to Menu', data: 'menu:main' }),
   ];
 
@@ -185,20 +160,26 @@ export async function showVaultItem(
   }
 
   if (item.description)        text += `\n\n📝 ${fmt.escape(item.description)}`;
-  if (item.r2_url)             text += `\n\n📎 ${fmt.link('View File', item.r2_url)}`;
   if (item.source_url)         text += `\n\n🌐 ${fmt.link('Source', item.source_url)}`;
   if (item.collection !== 'unsorted') text += `\n\n📁 ${fmt.escape(item.collection)}`;
 
-  const keyboard = [
+  const kbRows = [];
+  
+  if (item.r2_key) {
+    text += `\n\n📎 <i>File stored securely in R2.</i>`;
+    kbRows.push(kb.row({ text: '⬇️ Retrieve File', data: `vault:download:${itemId}` }));
+  }
+
+  kbRows.push(
     kb.row(
       { text: item.is_pinned ? '📌 Unpin' : '📌 Pin', data: `vault:pin:${itemId}` },
       { text: item.is_favorite ? '💔 Unfav' : '⭐ Fav', data: `vault:fav:${itemId}` },
     ),
     kb.row({ text: '🗑 Delete', data: `vault:delete_confirm:${itemId}` }),
-    kb.row({ text: '‹ Back', data: 'vault:menu' }),
-  ];
+    kb.row({ text: '‹ Back', data: 'vault:menu' })
+  );
 
-  const opts = { keyboard, disablePreview: false };
+  const opts = { keyboard: kbRows, disablePreview: false };
   if (messageId) await editMessage(token, chatId, messageId, text, opts);
   else           await sendMessage(token, chatId, text, opts);
 }
@@ -255,7 +236,6 @@ export async function handleVaultTextInput(env: Env, msg: TgMessage, token: stri
     }
 
     case 'search_query': {
-      // Global or vault-specific search
       const results = await searchVault(env, chatId, text);
       await clearState(env, chatId);
       if (results.length === 0) {
@@ -285,7 +265,7 @@ export async function autoSaveMedia(env: Env, msg: TgMessage, token: string) {
   let fileName = '';
 
   if (msg.photo) {
-    const photo = msg.photo[msg.photo.length - 1]; // highest resolution
+    const photo = msg.photo[msg.photo.length - 1];
     fileId   = photo.file_id;
     type     = 'image';
     mimeType = 'image/jpeg';
@@ -305,7 +285,6 @@ export async function autoSaveMedia(env: Env, msg: TgMessage, token: string) {
     fileName = 'voice_message.ogg';
   }
 
-
   if (!fileId) return;
 
   try {
@@ -315,7 +294,6 @@ export async function autoSaveMedia(env: Env, msg: TgMessage, token: string) {
       return;
     }
 
-    // Warn if file is large (Telegram limit is 20MB for bots)
     if (fileInfo.file_size && fileInfo.file_size > 20 * 1024 * 1024) {
       await sendMessage(token, chatId, '⚠️ File is too large to download via Bot API (>20 MB).');
       return;
@@ -325,7 +303,6 @@ export async function autoSaveMedia(env: Env, msg: TgMessage, token: string) {
     const ext     = fileInfo.file_path.split('.').pop() ?? 'bin';
     const r2Key   = `vault/${chatId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
 
-    // Upload to R2 with correct content type and metadata
     await env.R2.put(r2Key, buffer, {
       httpMetadata: {
         contentType:        mimeType,
@@ -346,11 +323,11 @@ export async function autoSaveMedia(env: Env, msg: TgMessage, token: string) {
     const id = await addVaultItem(
       env, chatId, type, title,
       caption || r2Key,
-      '',   // description
-      '',   // source_url
+      '',   
+      '',   
       'unsorted',
       r2Key,
-      undefined, // r2_url: we don't use public URLs — access via bot only
+      undefined,
     );
 
     await sendMessage(
@@ -411,6 +388,34 @@ export async function handleVaultCallback(
       await showVaultItem(env, chatId, token, parseInt(param), msgId);
       break;
 
+    case 'download': {
+      await answerCallback(token, cq.id, '⏳ Fetching from R2...', false);
+      const item = await getVaultById(env, parseInt(param), chatId);
+      
+      if (!item || !item.r2_key) {
+        await sendMessage(token, chatId, '❌ File not found in database.');
+        break;
+      }
+
+      const r2Object = await env.R2.get(item.r2_key);
+      if (!r2Object) {
+        await sendMessage(token, chatId, '❌ File missing from R2 bucket.');
+        break;
+      }
+
+      await sendChatAction(token, chatId, 'upload_document');
+      const buffer = await r2Object.arrayBuffer();
+      const mimeType = r2Object.httpMetadata?.contentType || 'application/octet-stream';
+      const fileName = item.r2_key.split('/').pop() || 'secure_file.bin';
+
+      const result = await sendDocumentUpload(token, chatId, buffer, fileName, mimeType);
+      
+      if (!result) {
+        await sendMessage(token, chatId, '❌ Failed to send file. It may exceed Telegram limits.');
+      }
+      break;
+    }
+
     case 'pin':
       await toggleVaultPin(env, parseInt(param), chatId);
       await answerCallback(token, cq.id, '📌 Updated');
@@ -453,7 +458,6 @@ export async function handleVaultCallback(
 
     case 'delete': {
       const item = await deleteVaultItem(env, parseInt(param), chatId);
-      // Clean up R2 object if present
       if (item?.r2_key) {
         await env.R2.delete(item.r2_key).catch((e) => {
           console.error('[Vault] R2 delete error:', e);
