@@ -1,6 +1,6 @@
 import { sendMessage, answerCallback, sendChatAction, fmt } from './telegram';
 import {
-  upsertUser, getUser, getSession, setState, clearState, getUserStats, globalSearch,
+  upsertUser, getUser, getSession, setState, clearState, getUserStats, globalSearch, getRateCount, incrementRateCount
 } from './db';
 import type { Env, TgUpdate, TgMessage, TgCallbackQuery } from './types';
 
@@ -252,21 +252,17 @@ async function handleMessage(env: Env, msg: TgMessage, token: string) {
   const chatId = msg.chat.id;
   const text   = msg.text?.trim() ?? '';
 
-  // Upsert user on every message
   if (msg.from) {
     await upsertUser(env, msg.from.id, msg.from.first_name, msg.from.username);
   }
 
-  // Commands
   if (text.startsWith('/')) {
     await handleCommand(env, msg, token);
     return;
   }
 
-  // Check session state
   const session = await getSession(env, chatId);
 
-  // Media auto-save — only when idle (not mid-flow)
   if (msg.photo || msg.video || msg.document || msg.voice) {
     if (session.state === 'idle') {
       await sendChatAction(token, chatId, 'upload_document');
@@ -275,7 +271,6 @@ async function handleMessage(env: Env, msg: TgMessage, token: string) {
     }
   }
 
-  // Idle state — show help prompt
   if (session.state === 'idle') {
     await sendMessage(
       token, chatId,
@@ -285,7 +280,6 @@ async function handleMessage(env: Env, msg: TgMessage, token: string) {
     return;
   }
 
-  // Global search handling — route to specific handler; handler clears state
   if (session.state === 'search_query') {
     const data    = JSON.parse(session.state_data) as { context?: string };
     const context = data.context;
@@ -301,7 +295,6 @@ async function handleMessage(env: Env, msg: TgMessage, token: string) {
     return;
   }
 
-  // Route to appropriate feature handler based on state prefix
   const state = session.state;
 
   if (state.startsWith('totp_'))    { await handleTotpInput(env, msg, token); return; }
@@ -310,7 +303,6 @@ async function handleMessage(env: Env, msg: TgMessage, token: string) {
   if (state.startsWith('todo_'))    { await handleTodoInput(env, msg, token); return; }
   if (state.startsWith('vault_'))   { await handleVaultTextInput(env, msg, token); return; }
 
-  // Unknown state — reset
   console.warn(`[Bot] unknown state "${state}" for chat ${chatId} — resetting`);
   await clearState(env, chatId);
   await sendMessage(token, chatId, '⚠️ Session reset. Use /menu to start fresh.');
@@ -322,9 +314,8 @@ async function handleCallback(env: Env, cq: TgCallbackQuery, token: string) {
   const data   = cq.data ?? '';
   const chatId = cq.message?.chat.id ?? cq.from.id;
 
-  // Parse callback data: "feature:action:param" or "feature:action"
   const [feature, action, ...rest] = data.split(':');
-  const param = rest.join(':'); // re-join in case param itself contains colons
+  const param = rest.join(':'); 
 
   switch (feature) {
     case 'menu':
@@ -384,7 +375,6 @@ async function handleCallback(env: Env, cq: TgCallbackQuery, token: string) {
       break;
 
     case 'close':
-      // Universal dismiss button
       await answerCallback(token, cq.id);
       if (cq.message) {
         const { deleteMessage } = await import('./telegram');
@@ -404,7 +394,6 @@ export default {
     const url    = new URL(request.url);
     const token  = env.BOT_TOKEN;
 
-    // ── Webhook registration endpoint ──────────────────────────
     if (url.pathname === '/register' && request.method === 'GET') {
       const webhookUrl = `${url.origin}/webhook`;
       const secret = (env as unknown as Record<string, string>)['WEBHOOK_SECRET'];
@@ -431,10 +420,7 @@ export default {
       );
     }
 
-    // ── Webhook endpoint ───────────────────────────────────────
     if (url.pathname === '/webhook' && request.method === 'POST') {
-      // Validate the Telegram webhook secret token header (if configured).
-      // Set env var WEBHOOK_SECRET to enable; otherwise all POSTs are accepted.
       const secret = (env as unknown as Record<string, string>)['WEBHOOK_SECRET'];
       if (secret) {
         const sentSecret = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
@@ -443,8 +429,6 @@ export default {
         }
       }
 
-      // Always return 200 immediately — Telegram needs this within 5s.
-      // All processing happens in ctx.waitUntil() background task.
       let update: TgUpdate;
       try {
         update = await request.json() as TgUpdate;
@@ -456,7 +440,6 @@ export default {
       return new Response('OK', { status: 200 });
     }
 
-    // ── Health check ───────────────────────────────────────────
     if (url.pathname === '/health') {
       return new Response(JSON.stringify({ status: 'ok', ts: Date.now() }), {
         headers: { 'Content-Type': 'application/json' },
@@ -473,43 +456,36 @@ async function processUpdate(env: Env, update: TgUpdate): Promise<void> {
   const token = env.BOT_TOKEN;
 
   try {
-    // ── Message ──────────────────────────────────────────────
+    const userId = update.message?.from?.id ?? update.callback_query?.from.id;
+    
+    // Strict Owner Gate
+    if (!userId || !isOwner(env, userId)) return;
+
+    // Edge Rate Limiting (Protects D1 from spike loads / infinite loops)
+    const actionKey = update.callback_query ? 'cb' : 'msg';
+    const rateCount = await getRateCount(env, userId, actionKey);
+    
+    // Block if > 120 actions per minute
+    if (rateCount > 120) {
+      console.warn(`[RateLimit] Dropping request for user ${userId}`);
+      return; 
+    }
+    await incrementRateCount(env, userId, actionKey);
+
     if (update.message) {
-      const msg    = update.message;
-      const userId = msg.from?.id;
-
-      // Owner-only security gate
-      if (!userId || !isOwner(env, userId)) {
-        // Silently ignore unauthorized senders
-        return;
-      }
-
-      await handleMessage(env, msg, token);
+      await handleMessage(env, update.message, token);
       return;
     }
 
-    // ── Edited message (ignore) ───────────────────────────────
     if (update.edited_message) return;
 
-    // ── Callback query ────────────────────────────────────────
     if (update.callback_query) {
-      const cq     = update.callback_query;
-      const userId = cq.from.id;
-
-      if (!isOwner(env, userId)) {
-        await answerCallback(token, cq.id, '⛔ Unauthorized', true);
-        return;
-      }
-
-      await handleCallback(env, cq, token);
+      await handleCallback(env, update.callback_query, token);
       return;
     }
   } catch (err) {
-    // Log the error but don't let it surface to Workers runtime —
-    // an unhandled exception here would waste the waitUntil budget
     console.error('[Bot] processUpdate error:', err);
 
-    // Attempt to notify the owner if we have context
     const chatId = update.message?.chat.id ?? update.callback_query?.message?.chat.id;
     if (chatId) {
       await sendMessage(token, chatId, '⚠️ An internal error occurred. Please try again.').catch(() => {});
