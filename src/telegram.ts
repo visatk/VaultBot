@@ -17,7 +17,6 @@ async function call<T = unknown>(
       body:    JSON.stringify(body),
     });
   } catch (err) {
-    // Network error — log and return null; caller decides how to proceed
     console.error(`[TG] network error on ${method}:`, err);
     return null;
   }
@@ -31,7 +30,6 @@ async function call<T = unknown>(
   }
 
   if (!json.ok) {
-    // Telegram errors are non-fatal — log with structured context
     console.error(`[TG] ${method} failed (${json.error_code ?? res.status}):`, json.description);
     return null;
   }
@@ -134,7 +132,7 @@ export function sendChatAction(
 export function sendPhoto(
   token: string,
   chatId: number,
-  photo: string,             // file_id or URL
+  photo: string,
   options: {
     caption?:   string;
     keyboard?:  InlineKeyboard;
@@ -152,7 +150,7 @@ export function sendPhoto(
 export function sendDocument(
   token: string,
   chatId: number,
-  document: string,          // file_id
+  document: string,
   options: {
     caption?:  string;
     keyboard?: InlineKeyboard;
@@ -191,6 +189,39 @@ export async function downloadFile(token: string, filePath: string): Promise<Arr
   return res.arrayBuffer();
 }
 
+// ── File Upload via FormData ──────────────────────────────────
+
+export async function sendDocumentUpload(
+  token: string,
+  chatId: number,
+  fileBuffer: ArrayBuffer,
+  fileName: string,
+  mimeType: string
+) {
+  const formData = new FormData();
+  formData.append('chat_id', chatId.toString());
+  
+  const blob = new Blob([fileBuffer], { type: mimeType });
+  formData.append('document', blob, fileName);
+
+  try {
+    const res = await fetch(`${BASE}${token}/sendDocument`, {
+      method: 'POST',
+      body: formData,
+    });
+    
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`[TG] upload failed: HTTP ${res.status}`, errorText);
+      return null;
+    }
+    return await res.json();
+  } catch (err) {
+    console.error(`[TG] upload network error:`, err);
+    return null;
+  }
+}
+
 // ── Bot info ──────────────────────────────────────────────────
 
 export function getMe(token: string) {
@@ -200,29 +231,20 @@ export function getMe(token: string) {
 // ── Keyboard builders ─────────────────────────────────────────
 
 export const kb = {
-  /** Single row of buttons */
   row: (...buttons: Array<{ text: string; data?: string; url?: string }>) =>
     buttons.map((b) =>
       b.url
         ? { text: b.text, url: b.url }
         : { text: b.text, callback_data: b.data ?? b.text },
     ),
-
-  /** Back button shorthand */
   back: (data: string) => [[{ text: '‹ Back', callback_data: data }]],
-
-  /** Close/dismiss button */
   close: () => [[{ text: '✕ Close', callback_data: 'close' }]],
-
-  /** Confirm / Cancel pair */
   confirm: (confirmData: string, cancelData = 'close') => [
     [
       { text: '✓ Confirm', callback_data: confirmData },
       { text: '✕ Cancel',  callback_data: cancelData  },
     ],
   ],
-
-  /** Pagination row — omits buttons that aren't needed */
   pager: (base: string, page: number, totalPages: number) => {
     const row = [];
     if (page > 0)              row.push({ text: '◀ Prev', callback_data: `${base}:${page - 1}` });
@@ -234,10 +256,8 @@ export const kb = {
 // ── HTML Formatters ───────────────────────────────────────────
 
 export const fmt = {
-  /** Escape special HTML characters for Telegram HTML parse mode */
   escape: (s: string) =>
     s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
-
   bold:   (s: string) => `<b>${fmt.escape(s)}</b>`,
   italic: (s: string) => `<i>${fmt.escape(s)}</i>`,
   code:   (s: string) => `<code>${fmt.escape(s)}</code>`,
@@ -245,8 +265,6 @@ export const fmt = {
     `<pre${lang ? ` language="${lang}"` : ''}>${fmt.escape(s)}</pre>`,
   link:   (text: string, url: string) => `<a href="${url}">${fmt.escape(text)}</a>`,
   mono:   (s: string) => `<code>${fmt.escape(s)}</code>`,
-
-  /** Format Unix timestamp → human-readable UTC date */
   date: (ts: number) =>
     new Date(ts * 1000).toLocaleDateString('en-US', {
       year:   'numeric',
@@ -256,8 +274,6 @@ export const fmt = {
       minute: '2-digit',
       timeZone: 'UTC',
     }) + ' UTC',
-
-  /** Relative time (e.g. "2 hours ago") */
   relativeTime: (ts: number): string => {
     const diff = Math.floor(Date.now() / 1000) - ts;
     if (diff < 60)      return 'just now';
@@ -266,22 +282,14 @@ export const fmt = {
     if (diff < 2592000) return `${Math.floor(diff / 86400)}d ago`;
     return fmt.date(ts);
   },
-
-  /** Priority badge */
   priority: (p: string) =>
     ({ low: '🟢', normal: '🔵', high: '🟡', urgent: '🔴' }[p] ?? '⚪'),
-
-  /** TOTP progress bar */
   timeBar: (remaining: number, period: number): string => {
     const filled = Math.round((remaining / period) * 10);
     const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
     return `[${bar}] ${remaining}s`;
   },
-
-  /** Truncate a string to maxLen, appending ellipsis */
   trunc: (s: string, maxLen = 60): string =>
     s.length > maxLen ? s.slice(0, maxLen) + '…' : s,
-
-  /** Section divider */
   divider: () => '─'.repeat(20),
 };
