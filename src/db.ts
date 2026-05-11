@@ -7,13 +7,13 @@ import type {
 
 const SESSION_TTL = 300; // 5 minutes — matches typical conversation gaps
 
-async function kvSessionKey(userId: number) {
+function kvSessionKey(userId: number): string {
   return `session:${userId}`;
 }
 
 async function kvGetSession(env: Env, userId: number): Promise<DbSession | null> {
   try {
-    const raw = await env.KV.get(await kvSessionKey(userId), 'json');
+    const raw = await env.KV.get(kvSessionKey(userId), 'json');
     return raw as DbSession | null;
   } catch {
     return null;
@@ -23,7 +23,7 @@ async function kvGetSession(env: Env, userId: number): Promise<DbSession | null>
 async function kvSetSession(env: Env, session: DbSession): Promise<void> {
   try {
     await env.KV.put(
-      await kvSessionKey(session.user_id),
+      kvSessionKey(session.user_id),
       JSON.stringify(session),
       { expirationTtl: SESSION_TTL },
     );
@@ -34,7 +34,30 @@ async function kvSetSession(env: Env, session: DbSession): Promise<void> {
 
 async function kvDelSession(env: Env, userId: number): Promise<void> {
   try {
-    await env.KV.delete(await kvSessionKey(userId));
+    await env.KV.delete(kvSessionKey(userId));
+  } catch { /* non-fatal */ }
+}
+
+// ── Rate-limit counter helpers (KV) ──────────────────────────
+// Used to throttle writes/operations per user per minute.
+
+export async function getRateCount(env: Env, userId: number, action: string): Promise<number> {
+  try {
+    const key = `rate:${userId}:${action}`;
+    const val = await env.KV.get(key);
+    return val ? parseInt(val) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function incrementRateCount(env: Env, userId: number, action: string): Promise<void> {
+  try {
+    const key = `rate:${userId}:${action}`;
+    const cur = await env.KV.get(key);
+    const next = cur ? parseInt(cur) + 1 : 1;
+    // TTL of 60 s — auto-expires each minute window
+    await env.KV.put(key, String(next), { expirationTtl: 60 });
   } catch { /* non-fatal */ }
 }
 
@@ -261,25 +284,22 @@ export async function updatePassword(
     category?: string;
   },
 ): Promise<boolean> {
-  // Only update provided fields to avoid overwriting encrypted data accidentally
   const sets: string[] = ['updated_at = unixepoch()'];
   const bindings: unknown[] = [id, userId];
   let idx = 3;
 
-  if (fields.title !== undefined) { sets.push(`title = ?${idx++}`); bindings.push(fields.title); }
+  if (fields.title !== undefined)    { sets.push(`title = ?${idx++}`);    bindings.push(fields.title); }
   if (fields.username !== undefined) { sets.push(`username = ?${idx++}`); bindings.push(fields.username); }
   if (fields.passwordEnc !== undefined && fields.iv !== undefined) {
     sets.push(`password_enc = ?${idx++}`); bindings.push(fields.passwordEnc);
-    sets.push(`iv = ?${idx++}`); bindings.push(fields.iv);
+    sets.push(`iv = ?${idx++}`);           bindings.push(fields.iv);
   }
-  if (fields.url !== undefined) { sets.push(`url = ?${idx++}`); bindings.push(fields.url); }
-  if (fields.notes !== undefined) { sets.push(`notes = ?${idx++}`); bindings.push(fields.notes); }
+  if (fields.url !== undefined)      { sets.push(`url = ?${idx++}`);      bindings.push(fields.url); }
+  if (fields.notes !== undefined)    { sets.push(`notes = ?${idx++}`);    bindings.push(fields.notes); }
   if (fields.category !== undefined) { sets.push(`category = ?${idx++}`); bindings.push(fields.category); }
 
   if (sets.length === 1) return false; // nothing to update
 
-  // D1 only supports ordered (?N) and anonymous (?) params — use anonymous here
-  // since we're building dynamic SQL
   const sql = `UPDATE passwords SET ${sets.join(', ')} WHERE id = ?1 AND user_id = ?2`;
   const result = await env.DB.prepare(sql).bind(...bindings).run();
   return (result.meta.changes ?? 0) > 0;
@@ -311,6 +331,23 @@ export async function getFavoritePasswords(env: Env, userId: number): Promise<Db
     .prepare('SELECT * FROM passwords WHERE user_id = ?1 AND is_favorite = 1 ORDER BY title ASC')
     .bind(userId)
     .all<DbPassword>();
+  return results;
+}
+
+export async function searchPasswords(
+  env: Env,
+  userId: number,
+  query: string,
+): Promise<Array<{ id: number; title: string; username: string; category: string }>> {
+  const like = `%${query}%`;
+  const { results } = await env.DB
+    .prepare(
+      `SELECT id, title, username, category FROM passwords
+        WHERE user_id = ?1 AND (title LIKE ?2 OR username LIKE ?2)
+        ORDER BY title ASC LIMIT 20`,
+    )
+    .bind(userId, like)
+    .all<{ id: number; title: string; username: string; category: string }>();
   return results;
 }
 
@@ -438,8 +475,7 @@ export async function getTodos(
 
   sql += ' ORDER BY is_done ASC, priority DESC, created_at ASC';
 
-  const stmt = env.DB.prepare(sql).bind(...binds);
-  const { results } = await stmt.all<DbTodo>();
+  const { results } = await env.DB.prepare(sql).bind(...binds).all<DbTodo>();
   return results;
 }
 
@@ -466,6 +502,23 @@ export async function addTodo(
     .bind(userId, title, description, priority, listName, dueDate ?? null)
     .run();
   return result.meta.last_row_id as number;
+}
+
+export async function updateTodo(
+  env: Env,
+  id: number,
+  userId: number,
+  title: string,
+  description: string,
+): Promise<boolean> {
+  const result = await env.DB.prepare(
+    `UPDATE todos
+        SET title = ?3, description = ?4, updated_at = unixepoch()
+      WHERE id = ?1 AND user_id = ?2`,
+  )
+    .bind(id, userId, title, description)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
 }
 
 export async function toggleTodoDone(env: Env, id: number, userId: number): Promise<DbTodo | null> {
@@ -544,7 +597,7 @@ export async function getVaultItems(
   const binds: unknown[] = [userId];
   let p = 2;
 
-  if (type) { sql += ` AND type = ?${p++}`; binds.push(type); }
+  if (type)       { sql += ` AND type = ?${p++}`;       binds.push(type); }
   if (collection) { sql += ` AND collection = ?${p++}`; binds.push(collection); }
 
   sql += ' ORDER BY is_pinned DESC, created_at DESC';
@@ -658,13 +711,13 @@ export async function getUserStats(env: Env, userId: number): Promise<UserStats>
   ]);
 
   return {
-    totp: (t.results[0] as { c: number })?.c ?? 0,
-    passwords: (p.results[0] as { c: number })?.c ?? 0,
-    notes: (n.results[0] as { c: number })?.c ?? 0,
+    totp:       (t.results[0] as { c: number })?.c ?? 0,
+    passwords:  (p.results[0] as { c: number })?.c ?? 0,
+    notes:      (n.results[0] as { c: number })?.c ?? 0,
     todos_open: (to.results[0] as { c: number })?.c ?? 0,
     todos_done: (td.results[0] as { c: number })?.c ?? 0,
-    vault: (v.results[0] as { c: number })?.c ?? 0,
-    overdue: (od.results[0] as { c: number })?.c ?? 0,
+    vault:      (v.results[0] as { c: number })?.c ?? 0,
+    overdue:    (od.results[0] as { c: number })?.c ?? 0,
   };
 }
 
@@ -700,9 +753,9 @@ export async function globalSearch(
   ]);
 
   return {
-    notes: nr.results as DbNote[],
-    todos: tr.results as DbTodo[],
-    vault: vr.results as DbVault[],
+    notes:     nr.results as DbNote[],
+    todos:     tr.results as DbTodo[],
+    vault:     vr.results as DbVault[],
     passwords: pr.results as Array<{ id: number; title: string; username: string; category: string }>,
   };
 }

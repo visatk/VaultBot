@@ -274,9 +274,17 @@ function bytesToHex(buf: Uint8Array): string {
   return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Safe base64 encoding for large buffers.
+ * Avoids call-stack overflow from spread operator on large arrays.
+ */
 function uint8ToBase64(buf: Uint8Array): string {
-  // btoa works on binary strings — fine in Workers runtime
-  return btoa(String.fromCharCode(...buf));
+  let binary = '';
+  const CHUNK = 8192;
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    binary += String.fromCharCode(...buf.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
 }
 
 function base64ToUint8(b64: string): Uint8Array {

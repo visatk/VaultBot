@@ -298,7 +298,13 @@ export async function autoSaveMedia(env: Env, msg: TgMessage, token: string) {
     mimeType = msg.document.mime_type ?? 'application/octet-stream';
     fileName = msg.document.file_name ?? '';
     type     = mimeToVaultType(mimeType);
+  } else if (msg.voice) {
+    fileId   = msg.voice.file_id;
+    type     = 'file';
+    mimeType = msg.voice.mime_type ?? 'audio/ogg';
+    fileName = 'voice_message.ogg';
   }
+
 
   if (!fileId) return;
 

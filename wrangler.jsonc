@@ -9,14 +9,20 @@
   "observability": {
     "enabled": true
   },
+  // ── Vars (non-secret config) ──────────────────────────────────
+  "vars": {
+    "BOT_USERNAME": "YourBotUsername" // update with your bot's @username (without @)
+  },
+  // ── D1 Database ───────────────────────────────────────────────
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "vault",
       "database_id": "4a723110-aa0c-4ae7-9af8-d80ed1ceb842",
-      "preview_database_id": "4a723110-aa0c-4ae7-9af8-d80ed1ceb842" 
+      "preview_database_id": "4a723110-aa0c-4ae7-9af8-d80ed1ceb842"
     }
   ],
+  // ── KV Namespace (session cache + rate counters) ───────────────
   "kv_namespaces": [
     {
       "binding": "KV",
@@ -24,6 +30,7 @@
       "preview_id": "aba08ec739114c07bf4bf4cfcdfdee05"
     }
   ],
+  // ── R2 Bucket (media vault storage) ───────────────────────────
   "r2_buckets": [
     {
       "binding": "R2",
@@ -31,4 +38,9 @@
       "preview_bucket_name": "vault"
     }
   ]
+  // ── Secrets (set via CLI, not here) ───────────────────────────
+  // npx wrangler secret put BOT_TOKEN
+  // npx wrangler secret put ENCRYPTION_KEY   (64 hex chars = 32 bytes)
+  // npx wrangler secret put OWNER_ID
+  // npx wrangler secret put WEBHOOK_SECRET   (optional, for webhook security)
 }

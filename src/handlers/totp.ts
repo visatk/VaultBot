@@ -8,6 +8,7 @@ import {
   getTotpAccounts, getTotpById, addTotpAccount, updateTotpAccount,
   deleteTotpAccount, getSession, setState, clearState,
 } from '../db';
+
 import {
   generateTOTP, encrypt, decrypt, isValidBase32, parseOtpauthUri,
 } from '../crypto';
@@ -198,7 +199,25 @@ export async function handleTotpInput(env: Env, msg: TgMessage, token: string) {
         await showTotpCode(env, chatId, token, id);
         return;
       }
-      // Treat as label
+
+      // Edit mode (editing_id present in state data)
+      if (typeof data.editing_id === 'number') {
+        const updated = await updateTotpAccount(
+          env, data.editing_id, chatId,
+          text,
+          typeof data.original_issuer === 'string' ? data.original_issuer : '',
+        );
+        await clearState(env, chatId);
+        if (updated) {
+          await sendMessage(token, chatId, `✅ Label updated to <b>${fmt.escape(text)}</b>`);
+          await showTotpCode(env, chatId, token, data.editing_id);
+        } else {
+          await sendMessage(token, chatId, '❌ Account not found.');
+        }
+        return;
+      }
+
+      // New account — treat as label
       await setState(env, chatId, 'totp_add_secret', { label: text });
       await sendMessage(
         token, chatId,
@@ -280,7 +299,11 @@ export async function handleTotpCallback(
       await answerCallback(token, cq.id);
       const account = await getTotpById(env, parseInt(param), chatId);
       if (!account) { await answerCallback(token, cq.id, '❌ Not found', true); return; }
-      await setState(env, chatId, 'totp_add_label', { editing_id: parseInt(param), original_label: account.label });
+      await setState(env, chatId, 'totp_add_label', {
+        editing_id:      parseInt(param),
+        original_label:  account.label,
+        original_issuer: account.issuer,
+      });
       await editMessage(
         token, chatId, msgId,
         `✏️ <b>Edit Account</b>\n\nCurrent label: ${fmt.code(account.label)}\n\nSend the new label, or /cancel:`,

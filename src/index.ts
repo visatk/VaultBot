@@ -1,4 +1,4 @@
-import { sendMessage, answerCallback, fmt } from './telegram';
+import { sendMessage, answerCallback, sendChatAction, fmt } from './telegram';
 import {
   upsertUser, getUser, getSession, setState, clearState, getUserStats, globalSearch,
 } from './db';
@@ -89,9 +89,10 @@ async function showSettingsMenu(
     `<b>Owner ID:</b> <code>${env.OWNER_ID}</code>\n\n` +
     `<b>Security</b>\n` +
     `• Encryption: AES-256-GCM\n` +
-    `• TOTP: RFC 6238\n` +
-    `• Storage: S3\n\n` +
-    `<i>All data is owner-only and end-to-end encrypted.</i>`;
+    `• TOTP: RFC 6238 HMAC-SHA1/256/512\n` +
+    `• Storage: Cloudflare R2\n` +
+    `• Sessions: KV (cache) + D1 (durable)\n\n` +
+    `<i>All data is owner-only and encrypted at rest.</i>`;
 
   const keyboard = [
     [{ text: '🔄 Reset Session', callback_data: 'menu:reset_session' }],
@@ -209,10 +210,27 @@ async function handleCommand(env: Env, msg: TgMessage, token: string) {
       await showVaultMenu(env, chatId, token);
       break;
 
+    case '/stats': {
+      const stats = await getUserStats(env, chatId);
+      await sendMessage(token, chatId,
+        `📊 <b>Your Stats</b>\n\n` +
+        `🔐 2FA Accounts: <b>${stats.totp}</b>\n` +
+        `🔑 Passwords:    <b>${stats.passwords}</b>\n` +
+        `📝 Notes:        <b>${stats.notes}</b>\n` +
+        `✅ Tasks open:   <b>${stats.todos_open}</b>\n` +
+        `✅ Tasks done:   <b>${stats.todos_done}</b>\n` +
+        `🗄 Vault items:  <b>${stats.vault}</b>` +
+        (stats.overdue > 0 ? `\n\n🔥 <b>${stats.overdue} overdue tasks!</b>` : ''),
+        { keyboard: [[{ text: '🏠 Main Menu', callback_data: 'menu:main' }]] },
+      );
+      break;
+    }
+
     case '/help':
       await sendMessage(token, chatId,
         `🤖 <b>VaultBot Commands</b>\n\n` +
         `/start — Main menu\n` +
+        `/stats — Storage statistics\n` +
         `/totp — 2FA authenticator\n` +
         `/passwords — Password manager\n` +
         `/notes — Personal notes\n` +
@@ -248,9 +266,10 @@ async function handleMessage(env: Env, msg: TgMessage, token: string) {
   // Check session state
   const session = await getSession(env, chatId);
 
-  // Media auto-save (no state required)
-  if (msg.photo || msg.video || msg.document) {
+  // Media auto-save — only when idle (not mid-flow)
+  if (msg.photo || msg.video || msg.document || msg.voice) {
     if (session.state === 'idle') {
+      await sendChatAction(token, chatId, 'upload_document');
       await autoSaveMedia(env, msg, token);
       return;
     }
@@ -266,17 +285,17 @@ async function handleMessage(env: Env, msg: TgMessage, token: string) {
     return;
   }
 
-  // Global search handling
+  // Global search handling — route to specific handler; handler clears state
   if (session.state === 'search_query') {
     const data    = JSON.parse(session.state_data) as { context?: string };
     const context = data.context;
-    await clearState(env, chatId);
 
     if (context === 'notes') {
       await handleNoteInput(env, msg, token);
     } else if (context === 'vault') {
       await handleVaultTextInput(env, msg, token);
     } else {
+      await clearState(env, chatId);
       await handleGlobalSearch(env, chatId, token, text);
     }
     return;
@@ -388,16 +407,21 @@ export default {
     // ── Webhook registration endpoint ──────────────────────────
     if (url.pathname === '/register' && request.method === 'GET') {
       const webhookUrl = `${url.origin}/webhook`;
+      const secret = (env as unknown as Record<string, string>)['WEBHOOK_SECRET'];
+      const body: Record<string, unknown> = {
+        url:                 webhookUrl,
+        allowed_updates:     ['message', 'callback_query'],
+        drop_pending_updates: true,
+        max_connections:     100,
+      };
+      if (secret) body['secret_token'] = secret;
+
       const res = await fetch(
         `https://api.telegram.org/bot${token}/setWebhook`,
         {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({
-            url:             webhookUrl,
-            allowed_updates: ['message', 'callback_query'],
-            drop_pending_updates: true,
-          }),
+          body:    JSON.stringify(body),
         },
       );
       const json = await res.json() as { ok: boolean; description?: string };
@@ -409,9 +433,18 @@ export default {
 
     // ── Webhook endpoint ───────────────────────────────────────
     if (url.pathname === '/webhook' && request.method === 'POST') {
-      // Always return 200 immediately — Telegram needs this within 5s
-      // All processing happens in ctx.waitUntil() background task
+      // Validate the Telegram webhook secret token header (if configured).
+      // Set env var WEBHOOK_SECRET to enable; otherwise all POSTs are accepted.
+      const secret = (env as unknown as Record<string, string>)['WEBHOOK_SECRET'];
+      if (secret) {
+        const sentSecret = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
+        if (sentSecret !== secret) {
+          return new Response('Forbidden', { status: 403 });
+        }
+      }
 
+      // Always return 200 immediately — Telegram needs this within 5s.
+      // All processing happens in ctx.waitUntil() background task.
       let update: TgUpdate;
       try {
         update = await request.json() as TgUpdate;
